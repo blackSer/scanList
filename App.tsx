@@ -3,7 +3,7 @@ import { StyleSheet, Text, View, Button, Alert, FlatList, ActivityIndicator, Pla
 // CAMBIO 1: Importamos SafeArea desde la nueva librería
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
 // CAMBIO 2: Usamos la versión legacy como sugiere el error para mantener compatibilidad
 // @ts-ignore
 import * as FileSystem from 'expo-file-system/legacy'; 
@@ -56,6 +56,37 @@ function MainScreen() {
         console.log("Error al reproducir sonido", error);
       }
     }
+
+      // 1. Efecto para cargar datos al INICIAR la app
+useEffect(() => {
+  const cargarProgresoRecuperado = async () => {
+    try {
+      const datosGuardados = await AsyncStorage.getItem('@inventario_progreso');
+      const columnasGuardadas = await AsyncStorage.getItem('@columnas_excel');
+      
+      if (datosGuardados !== null) {
+        setData(JSON.parse(datosGuardados));
+      }
+      if (columnasGuardadas !== null) {
+        setColumna(JSON.parse(columnasGuardadas));
+      }
+    } catch (e) {
+      console.error("Error recuperando datos", e);
+    }
+  };
+  cargarProgresoRecuperado();
+}, []);
+// 2. Función para guardar automáticamente (llámala después de cada escaneo exitoso)
+const guardarEnMemoria = async (nuevaData: DataItem[], nuevasColumnas?: string[]) => {
+  try {
+    await AsyncStorage.setItem('@inventario_progreso', JSON.stringify(nuevaData));
+    if (nuevasColumnas) {
+      await AsyncStorage.setItem('@columnas_excel', JSON.stringify(nuevasColumnas));
+    }
+  } catch (e) {
+    console.error("Error guardando progreso", e);
+  }
+};
   
   const totalRecords = data.length;
   const scannedRecords = data.filter(item => item.scanned).length;
@@ -113,7 +144,7 @@ function MainScreen() {
             // Buscamos algo que diga DESC o MATERIAL o ARTICULO
             const descIndex = headers.findIndex((q: any) => {
                 const head = String(q).toUpperCase();
-                return head.includes("DESC") || head.includes("MATERIAL");
+                return ["TIENDA", "NUMERO"].some(word => head.includes(word));
             });
 
             if (upcIndex === -1) {
@@ -193,15 +224,16 @@ function MainScreen() {
     const newData = [...data];
     newData[itemIndex].scanned = true;
     setData(newData);
-    
+    // GUARDAR AUTOMÁTICAMENTE
+    await guardarEnMemoria(newData);
     // Feedback visual inmediato (opcional cerrar alerta rápido)
     //Alert.alert("✅ Validado", `${newData[itemIndex].description}`, [
     // { text: "Siguiente", onPress: () => setScanned(false) }
     //]);
     setTimeout(() => {
         setScanned(false)
-        console.log("Retrasado por 1 segundo.");
-      }, 1000); 
+        console.log("Retrasado por 2 segundo.");
+      }, 2000); 
   };
 
   // ... (resto del código anterior se mantiene igual)
@@ -256,7 +288,7 @@ function MainScreen() {
       Alert.alert("Error", "No se pudo construir el archivo Excel.");
     }
   };
-  const limpiar = () => {
+  const limpiar = async () => {
   Alert.alert(
     "Limpiar datos",
     "¿Estás seguro de que quieres borrar el archivo actual y el progreso?",
@@ -264,10 +296,11 @@ function MainScreen() {
       { text: "Cancelar", style: "cancel" },
       { 
         text: "Sí, borrar", 
-        onPress: () => {
+        onPress: async () => {
           setData([]);       // Borra la lista
           setColumna([]);    // Borra los encabezados que creaste
           setShowCamera(false); // Cierra la cámara si estaba abierta
+          await AsyncStorage.multiRemove(['@inventario_progreso', '@columnas_excel']);
           Alert.alert("Limpio", "Puedes cargar un nuevo archivo.");
         } 
       }
@@ -281,7 +314,7 @@ function MainScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Scanner UPC</Text>
+      <Text style={styles.title}>Scanner de Cajas</Text>
 
       <View style={styles.statsContainer}>
         <View style={styles.statBox}>
@@ -341,7 +374,7 @@ function MainScreen() {
             <View style={[styles.item, item.scanned && styles.itemScanned]}>
               <View style={{flex: 1, paddingRight: 10}}>
                 <Text style={styles.itemCode}>{item.code}</Text>
-                <Text style={styles.itemDesc} numberOfLines={2}>{item.description}</Text>
+                <Text style={styles.itemDesc} numberOfLines={2}>{'TIENDA '+ item.description} - {item.originalRow[6] === '1' ? item.originalRow[6] + ' CAJA' : item.originalRow[6] + ' CAJAS'}</Text>
               </View>
               <View style={{justifyContent: 'center', alignItems: 'center'}}>
                   <Text style={{ fontSize: 20 }}>
